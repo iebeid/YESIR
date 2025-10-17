@@ -1,55 +1,36 @@
-# Prerequisites
-*.d
+# PyCharm
+.idea/
 
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
+# Virtual Environment
+.venv/
 
-# Linker output
-*.ilk
-*.map
-*.exp
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-
-# Shared objects (inc. Windows DLLs)
-*.dll
+# Python
+src/__pycache__/
+*.pyc
+*.pyo
+*.pyd
 *.so
-*.so.*
-*.dylib
+.Python
+build/
+dist/
 
-# Executables
-*.exe
+#Latex
+*.aux
+*.bbl
+*.blg
 *.out
-*.app
-*.i*86
-*.x86_64
-*.hex
+*.synctex.gz
+*.toc
 
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
+# --- Logs & Results ---
+# Use the trailing slash to ignore the directory and all its contents.
+# This is the definitive fix to prevent `git reset --hard` from deleting them.
+results/
+logs/
 
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+# Ignore all data files. Data is managed locally by the pipeline.
+data/*
+results/*
 
-# debug information files
-*.dwo
+# --- Environment Files ---
+ /configuration/environment.yml
