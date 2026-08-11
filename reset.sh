@@ -51,38 +51,66 @@ else
     echo "Skipping system dependency installation as requested. The build may fail if dependencies are missing."
 fi
 
+# --- Function for WSL-specific startup tasks ---
+run_wsl_startup_tasks() {
+    echo "INFO: Attempting to start the SSH server..."
+    sudo service ssh start &> /dev/null
+    if pgrep -x "sshd" &> /dev/null; then
+      echo "SUCCESS: SSH server process is running."
+    else
+      echo "WARNING: SSH server does not appear to be running."
+    fi
+    echo ""
+
+    echo "INFO: Proceeding to mount the Windows G: drive..."
+    MOUNT_POINT="/mnt/g"
+    echo "INFO: Ensuring mount point directory '$MOUNT_POINT' exists."
+    sudo mkdir -p "$MOUNT_POINT"
+    echo "INFO: Attempting to unmount '$MOUNT_POINT' to ensure a clean state."
+    sudo umount "$MOUNT_POINT" &> /dev/null
+    echo "INFO: Executing mount command..."
+    sudo mount -t drvfs G: "$MOUNT_POINT" -o metadata
+    if mountpoint -q "$MOUNT_POINT"; then
+        echo "SUCCESS: The G: drive has been mounted to $MOUNT_POINT."
+    else
+        echo "ERROR: The mount command failed. The drive is not mounted."
+    fi
+}
+
+# --- WSL-specific Setup ---
+if grep -qE "(Microsoft|WSL)" /proc/version &> /dev/null; then
+    read -r -p "This appears to be a WSL environment. Do you want to run WSL-specific tasks (start SSH, mount G: drive)? (y/n): " wsl_confirm
+    if [[ "$wsl_confirm" == "y" || "$wsl_confirm" == "Y" ]]; then
+        run_wsl_startup_tasks
+    fi
+fi
+
 # --- DEFINITIVE FIX: Ensure git-lfs is configured after installation ---
 echo "INFO: Running 'git lfs install' to configure Git hooks..."
 git lfs install
 
-# --- Configuration ---
-# Dynamically determine REPO_URL and PROJECT_DIR_NAME from the current git repository.
-# This assumes the script is run from within a git repository and is intended to reset that repository.
-
-# Get the directory where the script is located
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-
-# Find the git root directory relative to the script
-GIT_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
-if [ -z "$GIT_ROOT" ]; then
-    echo "ERROR: This script must be run from within a Git repository."
-    exit 1
-fi
-
-# Get the repository URL
-REPO_URL=$(git -C "$GIT_ROOT" config --get remote.origin.url)
+# --- Step 0: Get Target Project Configuration ---
+read -r -p "Please enter the Git repository URL for the project to set up: " REPO_URL
 if [ -z "$REPO_URL" ]; then
-    echo "ERROR: Could not determine repository URL from git config. Is 'origin' remote configured for this repository?"
+    echo "ERROR: Repository URL cannot be empty."
     exit 1
 fi
 
-# Get the project directory name (the name of the git root directory)
-PROJECT_DIR_NAME=$(basename "$GIT_ROOT")
+# Derive project name from the URL
+PROJECT_DIR_NAME=$(basename "$REPO_URL" .git)
 ENV_NAME="${PROJECT_DIR_NAME,,}-env" # Convert to lowercase for environment name
+CACHE_DIR_NAME="${PROJECT_DIR_NAME,,}" # lowercase name for cache
 PYTHON_VERSION="3.11"
-GIT_BRANCH="v2"
 
-# --- Step 0: Define Project Structure and Find Conda ---
+# --- DEFINITIVE FIX: Automatically detect the default branch ---
+# This avoids hardcoding 'main', 'master', or 'v2' and makes the script universal.
+GIT_BRANCH=$(git remote show "$REPO_URL" | sed -n '/HEAD branch/s/.*: //p')
+if [ -z "$GIT_BRANCH" ]; then
+    echo "WARNING: Could not auto-detect default branch. Falling back to 'main'. Clone may fail if 'main' does not exist."
+    GIT_BRANCH="main"
+fi
+
+# --- Step 0.1: Define Project Structure and Find Conda ---
 DOCUMENTS_DIR="$HOME/documents"
 PROJECTS_DIR="$DOCUMENTS_DIR/projects"
 
@@ -149,6 +177,30 @@ NEW_ENV_PIP="$NEW_ENV_PATH/bin/pip"
 echo "SUCCESS: Environment '$ENV_NAME' created."
 "$NEW_ENV_PYTHON" --version
 
+# --- NEW STEP 2.5: Configure environment for CUDA libraries ---
+# This incorporates the logic from 'export_cuda_env.sh' to ensure
+# libraries within the Conda environment (like cuDNN) are found first.
+echo -e "\n--- STEP 2.5: Configuring Environment for CUDA Libraries ---"
+read -r -p "Do you want to configure this environment to prioritize its own libraries (recommended for CUDA/cuDNN)? (y/n): " cuda_confirm
+if [[ "$cuda_confirm" == "y" || "$cuda_confirm" == "Y" ]]; then
+    ACTIVATE_DIR="$NEW_ENV_PATH/etc/conda/activate.d"
+    DEACTIVATE_DIR="$NEW_ENV_PATH/etc/conda/deactivate.d"
+    mkdir -p "$ACTIVATE_DIR"
+    mkdir -p "$DEACTIVATE_DIR"
+
+    # Create activation script to PREPEND the env's lib path
+    printf 'export OLD_LD_LIBRARY_PATH=${LD_LIBRARY_PATH}\nexport LD_LIBRARY_PATH=${CONDA_PREFIX}/lib/:${LD_LIBRARY_PATH}\n' > "$ACTIVATE_DIR/env_vars.sh"
+
+    # Create deactivation script to restore the old path
+    printf 'export LD_LIBRARY_PATH=${OLD_LD_LIBRARY_PATH}\nunset OLD_LD_LIBRARY_PATH\n' > "$DEACTIVATE_DIR/env_vars.sh"
+
+    chmod +x "$ACTIVATE_DIR/env_vars.sh"
+    chmod +x "$DEACTIVATE_DIR/env_vars.sh"
+    echo "SUCCESS: Environment configured to handle CUDA libraries on activation."
+else
+    echo "INFO: Skipping CUDA library path configuration."
+fi
+
 # --- Step 3: Reset Project Directory and Data Cache ---
 echo -e "\n--- STEP 3: Resetting Project Directory and Data Cache ---"
 cd "$PROJECTS_DIR"
@@ -158,7 +210,7 @@ echo -e "\n\n\033[1;31m" # Bold Red
 echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING: DESTRUCTIVE ACTION !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 echo "This script is about to COMPLETELY REMOVE the following directories:"
 echo "  1. Project Directory: $PROJECTS_DIR/$PROJECT_DIR_NAME"
-echo "  2. Persistent Cache:  $HOME/.cache/protgram_directgcn"
+echo "  2. Persistent Cache:  $HOME/.cache/$CACHE_DIR_NAME"
 echo ""
 echo "This will delete all local code changes, results, and cached data."
 echo "This action CANNOT be undone."
@@ -177,8 +229,8 @@ if [ -d "$PROJECT_DIR_NAME" ]; then
     echo "SUCCESS: Old project directory removed."
 fi
 
-# --- DEFINITIVE FIX: Also remove the persistent data cache to ensure a true reset ---
-CACHE_DIR="$HOME/.cache/protgram_directgcn"
+# --- DEFINITIVE FIX: Also remove the project-specific data cache to ensure a true reset ---
+CACHE_DIR="$HOME/.cache/$CACHE_DIR_NAME"
 if [ -d "$CACHE_DIR" ]; then
     rm -rf "$CACHE_DIR"
     echo "SUCCESS: Data cache removed."
@@ -197,10 +249,6 @@ echo "SUCCESS: Project repository is ready."
 echo -e "\n--- STEP 3.1: Verifying Cloned Repository State ---"
 echo "  - Current branch: $(git rev-parse --abbrev-ref HEAD)"
 echo "  - Latest commit: $(git log -1 --oneline)"
-echo "  - Verifying contents of 'configuration/__init__.py':"
-echo "    --- start of file ---"
-cat configuration/__init__.py || echo "    [INFO: File is empty or does not exist, which is the correct state.]"
-echo "    --- end of file ---"
 
 # --- NEW STEP: Install Python Dependencies ---
 # This step installs the minimal bootstrap dependencies (like PyYAML) needed for the main setup scripts to run.
@@ -216,11 +264,34 @@ else
     exit 1
 fi
 
+# --- Initialize a flag to track if setup.py was executed ---
+SETUP_PY_EXECUTED=false
+
+echo -e "\n--- STEP 4: Running the main setup script ('setup.py') ---"
+# --- DEFINITIVE FIX: Check for setup.py in root, then fall back to src/ ---
+SETUP_SCRIPT_PATH="setup.py"
+if [ ! -f "$SETUP_SCRIPT_PATH" ]; then
+    SETUP_SCRIPT_PATH="src/setup.py"
+fi
+
+if [ -f "$SETUP_SCRIPT_PATH" ]; then
+    echo "INFO: Executing '$SETUP_SCRIPT_PATH' to build the full Conda environment..."
+    "$NEW_ENV_PYTHON" "$SETUP_SCRIPT_PATH"
+    SETUP_PY_EXECUTED=true
+else
+    echo "WARNING: Main setup script ('setup.py') not found in project root or 'src/'."
+    echo "INFO: Skipping automatic environment build. The minimal environment with 'requirements.txt' packages is ready."
+fi
+
 echo -e "\n\n"
 echo "================================================================================"
-echo "--- RESET SCRIPT FINISHED ---"
-echo "--- The project code has been reset and a minimal Conda environment created. ---"
-echo -e "\n--- NEXT STEP: The main 'start.sh' script will complete the setup. ---"
-echo "--- Change to the project directory and run it with the following command: ---"
-echo "    cd $PROJECTS_DIR/$PROJECT_DIR_NAME && bash start.sh"
+if [ "$SETUP_PY_EXECUTED" = true ]; then
+    echo "--- PROJECT RESET AND SETUP COMPLETE ---"
+    echo "--- The project has been fully reset and the Conda environment has been built. ---"
+else
+    echo "--- PROJECT RESET COMPLETE ---"
+    echo "--- A minimal Conda environment with packages from requirements.txt has been created. ---"
+fi
+echo "--- You can now activate the environment and start working: ---"
+echo "    conda activate $ENV_NAME"
 exit 0
