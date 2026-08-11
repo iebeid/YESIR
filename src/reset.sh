@@ -56,9 +56,29 @@ echo "INFO: Running 'git lfs install' to configure Git hooks..."
 git lfs install
 
 # --- Configuration ---
-ENV_NAME="ppi-env"
-REPO_URL="https://github.com/iebeid/ProtGram-DirectGCN.git"
-PROJECT_DIR_NAME="ProtGram-DirectGCN"
+# Dynamically determine REPO_URL and PROJECT_DIR_NAME from the current git repository.
+# This assumes the script is run from within a git repository and is intended to reset that repository.
+
+# Get the directory where the script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Find the git root directory relative to the script
+GIT_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
+if [ -z "$GIT_ROOT" ]; then
+    echo "ERROR: This script must be run from within a Git repository."
+    exit 1
+fi
+
+# Get the repository URL
+REPO_URL=$(git -C "$GIT_ROOT" config --get remote.origin.url)
+if [ -z "$REPO_URL" ]; then
+    echo "ERROR: Could not determine repository URL from git config. Is 'origin' remote configured for this repository?"
+    exit 1
+fi
+
+# Get the project directory name (the name of the git root directory)
+PROJECT_DIR_NAME=$(basename "$GIT_ROOT")
+ENV_NAME="${PROJECT_DIR_NAME,,}-env" # Convert to lowercase for environment name
 PYTHON_VERSION="3.11"
 GIT_BRANCH="v2"
 
@@ -83,8 +103,7 @@ source "$CONDA_BASE/etc/profile.d/conda.sh"
 echo "INFO: Proactively accepting Conda Terms of Service to prevent interactive prompts..."
 # --- DEFINITIVE FIX: Handle multiple Conda versions and their ToS mechanisms ---
 # Newer versions use a single config key. Older versions use the 'tos' subcommand.
-# We try all known methods, and `|| true` ensures the script continues if a command is not supported.
-conda config --set anaconda_tos_accepted yes || true
+# We rely on `conda tos accept` for newer versions.
 conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
 conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r || true
 echo "SUCCESS: Conda Terms of Service handled."
@@ -186,7 +205,7 @@ echo "    --- end of file ---"
 # --- NEW STEP: Install Python Dependencies ---
 # This step installs the minimal bootstrap dependencies (like PyYAML) needed for the main setup scripts to run.
 echo -e "\n--- STEP 3.5: Installing Python Dependencies ---"
-REQUIREMENTS_FILE="configuration/requirements.txt"
+REQUIREMENTS_FILE="requirements.txt" # Assuming requirements.txt is in the root of the cloned repo
 if [ -f "$REQUIREMENTS_FILE" ]; then
     echo "INFO: Found bootstrap requirements at '$REQUIREMENTS_FILE'. Installing packages..."
     # Use the explicit path to pip from the new environment
