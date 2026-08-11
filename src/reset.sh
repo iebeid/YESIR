@@ -15,6 +15,13 @@
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
+# --- Root User Check: Prevent running the entire script as root ---
+if [ "$EUID" -eq 0 ]; then
+  echo "ERROR: This script should not be run as root (or with 'sudo')."
+  echo "It will ask for your password when it needs to install system packages."
+  exit 1
+fi
+
 # --- Pre-flight Check: Refresh sudo timestamp ---
 echo "INFO: This script uses 'sudo' to manage system services and mounts."
 echo "You may be prompted for your password once at the beginning."
