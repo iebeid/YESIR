@@ -32,7 +32,7 @@ if [[ "$install_confirm" == "y" || "$install_confirm" == "Y" ]]; then
     echo "INFO: Installing comprehensive system-level tools..."
     if command -v apt-get &> /dev/null; then
         echo "  - Debian/Ubuntu based system detected. Using apt-get."
-        sudo apt-get update && sudo apt-get install -y build-essential cmake libssl-dev autoconf automake libtool pkg-config git git-lfs
+        sudo apt-get update && sudo apt-get install -y build-essential cmake libssl-dev autoconf automake libtool pkg-config git git-lfs openssh-server
     elif command -v dnf &> /dev/null || command -v yum &> /dev/null; then
         echo "  - RedHat/CentOS/Fedora based system detected. Using dnf/yum."
         sudo yum install -y gcc-c++ make cmake openssl-devel autoconf automake libtool pkgconfig git git-lfs
@@ -54,7 +54,8 @@ fi
 # --- Function for WSL-specific startup tasks ---
 run_wsl_startup_tasks() {
     echo "INFO: Attempting to start the SSH server..."
-    sudo service ssh start &> /dev/null
+    # Attempt to start the service but use '|| true' to prevent the script from exiting if it fails.
+    sudo service ssh start &> /dev/null || true
     if pgrep -x "sshd" &> /dev/null; then
       echo "SUCCESS: SSH server process is running."
     else
@@ -66,14 +67,17 @@ run_wsl_startup_tasks() {
     MOUNT_POINT="/mnt/g"
     echo "INFO: Ensuring mount point directory '$MOUNT_POINT' exists."
     sudo mkdir -p "$MOUNT_POINT"
-    echo "INFO: Attempting to unmount '$MOUNT_POINT' to ensure a clean state."
-    sudo umount "$MOUNT_POINT" &> /dev/null
+    # Only attempt to unmount if it's already a mount point.
+    if mountpoint -q "$MOUNT_POINT"; then
+        echo "INFO: Unmounting existing device at '$MOUNT_POINT' to ensure a clean state."
+        sudo umount "$MOUNT_POINT" || true
+    fi
     echo "INFO: Executing mount command..."
-    sudo mount -t drvfs G: "$MOUNT_POINT" -o metadata
+    sudo mount -t drvfs G: "$MOUNT_POINT" -o metadata || true
     if mountpoint -q "$MOUNT_POINT"; then
         echo "SUCCESS: The G: drive has been mounted to $MOUNT_POINT."
     else
-        echo "ERROR: The mount command failed. The drive is not mounted."
+        echo "WARNING: Failed to mount G: drive. It may not exist on the Windows host."
     fi
 }
 
