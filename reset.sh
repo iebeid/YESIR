@@ -19,12 +19,26 @@ set -e
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 BOOTSTRAP_REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
 
+# --- Internet Connectivity Check ---
+check_internet() {
+    echo "INFO: Checking internet connectivity..."
+    if ping -c 1 8.8.8.8 &> /dev/null; then
+        echo "SUCCESS: Internet connection is active."
+    else
+        echo "ERROR: No internet connection. Please check your network and try again."
+        exit 1
+    fi
+}
+
 # --- Root User Check: Prevent running the entire script as root ---
 if [ "$EUID" -eq 0 ]; then
   echo "ERROR: This script should not be run as root (or with 'sudo')."
   echo "It will ask for your password when it needs to install system packages."
   exit 1
 fi
+
+# --- Run initial checks ---
+check_internet
 
 # --- Pre-flight Check: Refresh sudo timestamp ---
 echo "INFO: This script uses 'sudo' to manage system services and mounts."
@@ -165,11 +179,28 @@ fi
 conda clean --all -y > /dev/null
 echo "SUCCESS: Conda cache cleaned."
 
+# --- Function to check for existing GPU driver and set Conda packages ---
+check_gpu_and_set_cuda_packages() {
+    echo "INFO: Checking for existing NVIDIA GPU driver..."
+    if command -v nvidia-smi &> /dev/null; then
+        echo "SUCCESS: Found existing system-level NVIDIA driver. Conda will only install the CUDA toolkit."
+        # If a system driver exists, we only need the CUDA toolkit from Conda
+        # which will be compatible with the driver.
+        CUDA_PACKAGES="cuda"
+    else
+        echo "WARNING: No system-level NVIDIA driver found (nvidia-smi not in PATH)."
+        echo "INFO: Will attempt to install both driver and CUDA toolkit via Conda."
+        # If no system driver, install both from Conda.
+        CUDA_PACKAGES="nvidia-driver cuda"
+    fi
+}
+
 # --- Step 2: Re-create Environment and Activate ---
 echo -e "\n--- STEP 2: Re-creating a minimal Conda Environment '$ENV_NAME' ---"
 echo "INFO: This creates a bare-bones Python environment. The full set of packages"
 echo "      will be installed later by the 'setup.py' script."
-conda create -n "$ENV_NAME" -c conda-forge python="$PYTHON_VERSION" -y
+check_gpu_and_set_cuda_packages
+conda create -n "$ENV_NAME" -c conda-forge -c nvidia python="$PYTHON_VERSION" $CUDA_PACKAGES -y
 
 # --- DEFINITIVE FIX: Dynamically find the new environment's path ---
 # Instead of assuming the env is in `$CONDA_BASE/envs`, we parse conda's output
@@ -276,11 +307,7 @@ SETUP_PY_EXECUTED=false
 
 echo -e "\n--- STEP 4: Running the main setup script ('setup.py') ---"
 # --- DEFINITIVE FIX: Check for setup.py in root, then fall back to src/ ---
-SETUP_SCRIPT_PATH="setup.py"
-if [ ! -f "$SETUP_SCRIPT_PATH" ]; then
-    SETUP_SCRIPT_PATH="src/setup.py"
-fi
-
+SETUP_SCRIPT_PATH=$(find . -maxdepth 2 -name "setup.py" | head -n 1)
 if [ -f "$SETUP_SCRIPT_PATH" ]; then
     echo "INFO: Executing '$SETUP_SCRIPT_PATH' to build the full Conda environment..."
     "$NEW_ENV_PYTHON" "$SETUP_SCRIPT_PATH"
