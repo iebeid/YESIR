@@ -22,7 +22,8 @@ BOOTSTRAP_REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
 # --- Internet Connectivity Check ---
 check_internet() {
     echo "INFO: Checking internet connectivity..."
-    if ping -c 1 8.8.8.8 &> /dev/null; then
+    # Ping a reliable domain name. This is more robust than an IP ping as it also verifies DNS resolution.
+    if ping -c 1 www.google.com &> /dev/null; then
         echo "SUCCESS: Internet connection is active."
     else
         echo "ERROR: No internet connection. Please check your network and try again."
@@ -200,6 +201,8 @@ echo -e "\n--- STEP 2: Re-creating a minimal Conda Environment '$ENV_NAME' ---"
 echo "INFO: This creates a bare-bones Python environment. The full set of packages"
 echo "      will be installed later by the 'setup.py' script."
 check_gpu_and_set_cuda_packages
+# Conda will automatically resolve and install the latest compatible versions of the CUDA toolkit
+# and drivers from the specified channels.
 conda create -n "$ENV_NAME" -c conda-forge -c nvidia python="$PYTHON_VERSION" $CUDA_PACKAGES -y
 
 # --- DEFINITIVE FIX: Dynamically find the new environment's path ---
