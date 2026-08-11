@@ -180,19 +180,15 @@ fi
 conda clean --all -y > /dev/null
 echo "SUCCESS: Conda cache cleaned."
 
-# --- Function to check for existing GPU driver and set Conda packages ---
-check_gpu_and_set_cuda_packages() {
+# --- Function to check for existing GPU driver ---
+check_gpu_driver() {
     echo "INFO: Checking for existing NVIDIA GPU driver..."
     if command -v nvidia-smi &> /dev/null; then
-        echo "SUCCESS: Found existing system-level NVIDIA driver. Conda will only install the CUDA toolkit."
-        # If a system driver exists, we only need the CUDA toolkit from Conda
-        # which will be compatible with the driver.
-        CUDA_PACKAGES="cuda"
+        echo "SUCCESS: Found existing system-level NVIDIA driver."
+        echo "INFO: The project's setup.py will be responsible for installing a compatible CUDA toolkit."
     else
         echo "WARNING: No system-level NVIDIA driver found (nvidia-smi not in PATH)."
-        echo "INFO: Will attempt to install both driver and CUDA toolkit via Conda."
-        # If no system driver, install both from Conda.
-        CUDA_PACKAGES="nvidia-driver cuda"
+        echo "INFO: The project's setup.py may attempt to install both the driver and CUDA toolkit via Conda."
     fi
 }
 
@@ -200,10 +196,8 @@ check_gpu_and_set_cuda_packages() {
 echo -e "\n--- STEP 2: Re-creating a minimal Conda Environment '$ENV_NAME' ---"
 echo "INFO: This creates a bare-bones Python environment. The full set of packages"
 echo "      will be installed later by the 'setup.py' script."
-check_gpu_and_set_cuda_packages
-# Conda will automatically resolve and install the latest compatible versions of the CUDA toolkit
-# and drivers from the specified channels.
-conda create -n "$ENV_NAME" -c conda-forge -c nvidia python="$PYTHON_VERSION" $CUDA_PACKAGES -y
+check_gpu_driver
+conda create -n "$ENV_NAME" -c conda-forge python="$PYTHON_VERSION" -y
 
 # --- DEFINITIVE FIX: Dynamically find the new environment's path ---
 # Instead of assuming the env is in `$CONDA_BASE/envs`, we parse conda's output
