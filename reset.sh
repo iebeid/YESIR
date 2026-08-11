@@ -303,9 +303,16 @@ fi
 SETUP_PY_EXECUTED=false
 
 echo -e "\n--- STEP 4: Running the main setup script ('setup.py') ---"
-# --- DEFINITIVE FIX: Check for setup.py in root, then fall back to src/ ---
-SETUP_SCRIPT_PATH=$(find . -maxdepth 2 -name "setup.py" | head -n 1)
-if [ -f "$SETUP_SCRIPT_PATH" ]; then
+# --- More robust check for setup.py in common locations ---
+SETUP_SCRIPT_PATH=""
+if [ -f "setup.py" ]; then
+    SETUP_SCRIPT_PATH="setup.py"
+elif [ -f "src/setup.py" ]; then
+    SETUP_SCRIPT_PATH="src/setup.py"
+elif [ -f "configuration/setup.py" ]; then
+    SETUP_SCRIPT_PATH="configuration/setup.py"
+fi
+if [ -n "$SETUP_SCRIPT_PATH" ] && [ -f "$SETUP_SCRIPT_PATH" ]; then
     echo "INFO: Executing '$SETUP_SCRIPT_PATH' to build the full Conda environment..."
     "$NEW_ENV_PYTHON" "$SETUP_SCRIPT_PATH"
     SETUP_PY_EXECUTED=true
