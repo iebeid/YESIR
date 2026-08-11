@@ -15,6 +15,10 @@
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
+# --- Capture the script's own directory to find its own files later ---
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+BOOTSTRAP_REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
+
 # --- Root User Check: Prevent running the entire script as root ---
 if [ "$EUID" -eq 0 ]; then
   echo "ERROR: This script should not be run as root (or with 'sudo')."
@@ -257,14 +261,13 @@ echo "  - Latest commit: $(git log -1 --oneline)"
 # --- NEW STEP: Install Python Dependencies ---
 # This step installs the minimal bootstrap dependencies (like PyYAML) needed for the main setup scripts to run.
 echo -e "\n--- STEP 3.5: Installing Python Dependencies ---"
-REQUIREMENTS_FILE="requirements.txt" # Assuming requirements.txt is in the root of the cloned repo
-if [ -f "$REQUIREMENTS_FILE" ]; then
-    echo "INFO: Found bootstrap requirements at '$REQUIREMENTS_FILE'. Installing packages..."
+if [ -f "$BOOTSTRAP_REQUIREMENTS_FILE" ]; then
+    echo "INFO: Found bootstrap requirements at '$BOOTSTRAP_REQUIREMENTS_FILE'. Installing packages..."
     # Use the explicit path to pip from the new environment
-    "$NEW_ENV_PIP" install --no-cache-dir --upgrade -r "$REQUIREMENTS_FILE"
+    "$NEW_ENV_PIP" install --no-cache-dir --upgrade -r "$BOOTSTRAP_REQUIREMENTS_FILE"
     echo "SUCCESS: Python dependencies installed."
 else
-    echo "ERROR: Bootstrap requirements file not found at '$REQUIREMENTS_FILE'. Cannot install dependencies."
+    echo "ERROR: Bootstrap requirements file not found at '$BOOTSTRAP_REQUIREMENTS_FILE'. This file is required for the setup."
     exit 1
 fi
 
