@@ -18,6 +18,7 @@ set -e
 # --- Capture the script's own directory to find its own files later ---
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 BOOTSTRAP_REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
+TOOLKIT_SETUP_PY="$SCRIPT_DIR/setup.py"
 
 # --- Internet Connectivity Check ---
 check_internet() {
@@ -25,6 +26,9 @@ check_internet() {
     # Ping a reliable domain name. This is more robust than an IP ping as it also verifies DNS resolution.
     if ping -c 1 www.google.com &> /dev/null; then
         echo "SUCCESS: Internet connection is active."
+        # Get primary IP address
+        IP_ADDR=$(hostname -I | awk '{print $1}')
+        echo "INFO: Machine IP Address: $IP_ADDR"
     else
         echo "ERROR: No internet connection. Please check your network and try again."
         exit 1
@@ -51,7 +55,7 @@ if [[ "$install_confirm" == "y" || "$install_confirm" == "Y" ]]; then
     echo "INFO: Installing comprehensive system-level tools..."
     if command -v apt-get &> /dev/null; then
         echo "  - Debian/Ubuntu based system detected. Using apt-get."
-        sudo apt-get update && sudo apt-get install -y build-essential cmake libssl-dev autoconf automake libtool pkg-config git git-lfs openssh-server
+        sudo apt-get update && sudo apt-get install -y build-essential cmake libssl-dev autoconf automake libtool pkg-config git git-lfs openssh-server vsftpd
     elif command -v dnf &> /dev/null || command -v yum &> /dev/null; then
         echo "  - RedHat/CentOS/Fedora based system detected. Using dnf/yum."
         sudo yum install -y gcc-c++ make cmake openssl-devel autoconf automake libtool pkgconfig git git-lfs
@@ -69,6 +73,29 @@ if [[ "$install_confirm" == "y" || "$install_confirm" == "Y" ]]; then
 else
     echo "Skipping system dependency installation as requested. The build may fail if dependencies are missing."
 fi
+
+# --- Configure FTP Server (if installed) ---
+configure_ftp_server() {
+    if command -v vsftpd &> /dev/null; then
+        echo "INFO: Configuring FTP server (vsftpd)..."
+        FTP_CONF="/etc/vsftpd.conf"
+        # Backup the original config file just in case
+        sudo cp "$FTP_CONF" "$FTP_CONF.bak"
+        # Enable local user login and write permissions
+        sudo sed -i 's/^#?local_enable=.*/local_enable=YES/' "$FTP_CONF"
+        sudo sed -i 's/^#?write_enable=.*/write_enable=YES/' "$FTP_CONF"
+        # Add passive mode settings for better firewall compatibility
+        if ! grep -q "pasv_min_port" "$FTP_CONF"; then
+            echo "INFO: Adding passive mode settings to FTP configuration."
+            printf "\n# Added by reset.sh for firewall compatibility\npasv_enable=YES\npasv_min_port=10000\npasv_max_port=10100\n" | sudo tee -a "$FTP_CONF" > /dev/null
+        fi
+        echo "INFO: Restarting FTP server..."
+        sudo systemctl restart vsftpd
+        echo "SUCCESS: FTP server configured and restarted."
+    fi
+}
+
+configure_ftp_server
 
 # --- Function for WSL-specific startup tasks ---
 run_wsl_startup_tasks() {
@@ -303,21 +330,14 @@ fi
 SETUP_PY_EXECUTED=false
 
 echo -e "\n--- STEP 4: Running the main setup script ('setup.py') ---"
-# --- More robust check for setup.py in common locations ---
-SETUP_SCRIPT_PATH=""
-if [ -f "setup.py" ]; then
-    SETUP_SCRIPT_PATH="setup.py"
-elif [ -f "src/setup.py" ]; then
-    SETUP_SCRIPT_PATH="src/setup.py"
-elif [ -f "configuration/setup.py" ]; then
-    SETUP_SCRIPT_PATH="configuration/setup.py"
-fi
-if [ -n "$SETUP_SCRIPT_PATH" ] && [ -f "$SETUP_SCRIPT_PATH" ]; then
-    echo "INFO: Executing '$SETUP_SCRIPT_PATH' to build the full Conda environment..."
-    "$NEW_ENV_PYTHON" "$SETUP_SCRIPT_PATH"
+# --- Definitive fix: Use the absolute path to the toolkit's setup.py ---
+if [ -f "$TOOLKIT_SETUP_PY" ]; then
+    echo "INFO: Executing '$TOOLKIT_SETUP_PY' to build the full Conda environment..."
+    # Pass the dynamically generated environment name to the setup script
+    "$NEW_ENV_PYTHON" "$TOOLKIT_SETUP_PY" --env-name "$ENV_NAME"
     SETUP_PY_EXECUTED=true
 else
-    echo "WARNING: Main setup script ('setup.py') not found in project root or 'src/'."
+    echo "WARNING: Main setup script ('setup.py') not found at '$TOOLKIT_SETUP_PY'."
     echo "INFO: Skipping automatic environment build. The minimal environment with 'requirements.txt' packages is ready."
 fi
 

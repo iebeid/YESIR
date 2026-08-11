@@ -82,8 +82,16 @@ def get_conda_base_path() -> str | None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Install required packages into the active Conda environment.")
-    parser.parse_args()
+    parser = argparse.ArgumentParser(description="Install required packages into a Conda environment.")
+    # --- DEFINITIVE FIX: Allow overriding the environment name via command line ---
+    parser.add_argument("--env-name", type=str, default=ENV_NAME,
+                        help=f"The name of the Conda environment to set up. Defaults to '{ENV_NAME}'.")
+    args = parser.parse_args()
+
+    # Override the global ENV_NAME with the value from the command line
+    # This makes the script compatible with the generic reset.sh tool.
+    ENV_NAME = args.env_name
+    print(f"--- Target Conda Environment: {ENV_NAME} ---")
 
     conda_base = get_conda_base_path()
     if not conda_base:
